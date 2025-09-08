@@ -91,27 +91,27 @@ def lark_events():
             return Response(json.dumps({"challenge": challenge}), status=200, mimetype="application/json")
 
         # 2) Normal events
-event = data.get("event", {})
-etype = data.get("header", {}).get("event_type")
-logging.info(f"Event type={etype}")
+        # 2) Normal events
+        event = data.get("event", {})
+        etype = data.get("header", {}).get("event_type")
+        logging.info(f"Event type={etype}")
 
-        if etype == "message":
+        if etype == "im.message.receive_v1":
             msg = event.get("message", {}) or {}
             chat_id = msg.get("chat_id")
-            msg_id = msg.get("message_id")
             content_raw = msg.get("content", "{}")
 
             try:
                 parsed = json.loads(content_raw)
             except Exception:
                 parsed = {}
+
             text = (parsed.get("text") or "").lower()
             mentions = parsed.get("mentions", [])
+            logging.info(f"chat_id={chat_id} text={text!r} mentions={mentions}")
 
-            logging.info(f"message_id={msg_id} chat_id={chat_id} text={text!r} mentions={mentions}")
-
-            # TEMP test: reply if text includes 'fika' (no need to @mention)
-            if "fika" in text and chat_id:
+            # TEMP: reply if text contains 'fika'
+            if chat_id and "fika" in text:
                 now = datetime.now(TZ)
                 target_dt, target_label = next_fika(now)
                 mins = minutes_until(target_dt, now)
@@ -121,7 +121,7 @@ logging.info(f"Event type={etype}")
                     else f"☕️ Next fika is at {target_label} (local).\n⏳ {mins} minute{'s' if mins != 1 else ''} left."
                 )
                 ok = send_text_to_chat(chat_id, reply)
-                logging.info(f"Sent reply ok={ok} to chat_id={chat_id}")
+                logging.info(f"Sent reply ok={ok}")
 
         # Always ACK with JSON
         return Response('{"code":0,"msg":"ok"}', status=200, mimetype="application/json")
