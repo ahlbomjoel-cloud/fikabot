@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 import requests
 
 # === Your Lark credentials ===
@@ -65,46 +65,55 @@ def health():
 
 @app.route("/lark", methods=["POST"])
 def lark_events():
-    data = request.get_json(force=True, silent=True) or {}
+    try:
+        data = request.get_json(force=True, silent=True) or {}
 
-    # URL verification handshake
-    if "challenge" in data:
-        return jsonify({"challenge": data["challenge"]})
+        # URL verification handshake — must return pure JSON
+        if "challenge" in data:
+            return Response(
+                json.dumps({"challenge": data["challenge"]}),
+                status=200,
+                mimetype="application/json",
+            )
 
-    event = data.get("event", {})
-    if event.get("type") == "message":
-        msg = event.get("message", {}) or {}
-        chat_id = msg.get("chat_id")
+        event = data.get("event", {})
+        if event.get("type") == "message":
+            msg = event.get("message", {}) or {}
+            chat_id = msg.get("chat_id")
 
-        # Parse content to get text + mentions
-        try:
-            parsed = json.loads(msg.get("content", "{}"))
-            text = (parsed.get("text") or "").lower()
-            mentions = parsed.get("mentions", [])
-        except Exception:
-            text, mentions = "", []
+            # Parse content to get text + mentions
+            try:
+                parsed = json.loads(msg.get("content", "{}"))
+                text = (parsed.get("text") or "").lower()
+                mentions = parsed.get("mentions", [])
+            except Exception:
+                text, mentions = "", []
 
-        # Only respond when the bot is @mentioned
-        bot_was_tagged = bool(mentions)
+            # Only respond when the bot is @mentioned
+            bot_was_tagged = bool(mentions)
 
-        if bot_was_tagged:
-            now = datetime.now(TZ)
-            target_dt, target_label = next_fika(now)
-            mins = minutes_until(target_dt, now)
+            if bot_was_tagged:
+                now = datetime.now(TZ)
+                target_dt, target_label = next_fika(now)
+                mins = minutes_until(target_dt, now)
 
-            if mins == 0:
-                reply = f"☕️ It’s FIKA time right now ({target_label})!"
-            else:
-                reply = (
-                    f"☕️ Next fika is at {target_label} (local).\n"
-                    f"⏳ {mins} minute{'s' if mins != 1 else ''} left."
-                )
-            # Optional: only answer when message includes 'fika' to be extra strict:
-            # if "fika" in text:
-            send_text_to_chat(chat_id, reply)
+                if mins == 0:
+                    reply = f"☕️ It’s FIKA time right now ({target_label})!"
+                else:
+                    reply = (
+                        f"☕️ Next fika is at {target_label} (local).\n"
+                        f"⏳ {mins} minute{'s' if mins != 1 else ''} left."
+                    )
+                # Optional: also require 'fika' in text -> if "fika" in text:
+                send_text_to_chat(chat_id, reply)
 
-    # Quick ACK to minimize compute
-    return jsonify({"code": 0, "msg": "ok"})
+        # Always ACK with JSON so Lark never sees an HTML error page
+        return Response('{"code":0,"msg":"ok"}', status=200, mimetype="application/json")
+
+    except Exception:
+        logging.exception("Error in /lark")
+        # Still return JSON, even if something went wrong
+        return Response('{"code":0,"msg":"handled-error"}', status=200, mimetype="application/json")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
