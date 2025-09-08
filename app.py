@@ -60,13 +60,12 @@ def send_text_to_chat(chat_id: str, text: str):
             "Content-Type": "application/json"
         }
         
-        # Properly format the content with ensure_ascii=False
-        content_dict = {"text": text}
+        # The content should be a JSON object, not a JSON string!
         payload = {
             "receive_id_type": "chat_id",
             "receive_id": chat_id,
             "msg_type": "text",
-            "content": json.dumps(content_dict, ensure_ascii=False),
+            "content": {"text": text},  # This is the key fix - no json.dumps() here!
         }
         
         if DEBUG_VERBOSE:
