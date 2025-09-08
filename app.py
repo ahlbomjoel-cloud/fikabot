@@ -65,20 +65,25 @@ def send_text_to_chat(chat_id: str, text: str):
             "Content-Type": "application/json"
         }
         
-        # The content should be a JSON object, not a JSON string!
+        # According to Lark API documentation, the structure might be different
         payload = {
-            "receive_id_type": "chat_id",
             "receive_id": chat_id,
             "msg_type": "text",
-            "content": {"text": text},
+            "content": json.dumps({"text": text}),  # Content needs to be JSON string
+        }
+        
+        # Add receive_id_type as a query parameter instead of in the body
+        params = {
+            "receive_id_type": "chat_id"
         }
         
         if DEBUG_VERBOSE:
             logging.info(f"POST {url}")
             logging.info(f"Headers: {headers}")
+            logging.info(f"Params: {params}")
             logging.info(f"Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
             
-        r = requests.post(url, headers=headers, json=payload, timeout=10)
+        r = requests.post(url, headers=headers, params=params, json=payload, timeout=10)
         
         # Get the response for debugging
         response_data = r.json()
