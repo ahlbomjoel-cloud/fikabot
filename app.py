@@ -19,6 +19,8 @@ APP_SECRET = os.getenv("LARK_APP_SECRET", "").strip()
 # Validate that credentials are provided
 if not APP_ID or not APP_SECRET:
     logging.warning("Lark credentials not found in environment variables")
+else:
+    logging.info("Lark credentials loaded successfully")
 
 # Debug mode setting
 DEBUG_VERBOSE = os.getenv("DEBUG_VERBOSE", "0") == "1"
@@ -53,25 +55,35 @@ def send_text_to_chat(chat_id: str, text: str):
     try:
         token = get_tenant_access_token()
         url = "https://open.larksuite.com/open-apis/im/v1/messages"
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Properly format the content with ensure_ascii=False
+        content_dict = {"text": text}
         payload = {
             "receive_id_type": "chat_id",
             "receive_id": chat_id,
             "msg_type": "text",
-            "content": json.dumps({"text": text}),
+            "content": json.dumps(content_dict, ensure_ascii=False),
         }
         
         if DEBUG_VERBOSE:
-            logging.info(f"POST {url} payload={payload}")
+            logging.info(f"POST {url}")
+            logging.info(f"Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
             
         r = requests.post(url, headers=headers, json=payload, timeout=10)
         r.raise_for_status()
         
-        if DEBUG_VERBOSE:
-            data = r.json()
-            logging.info(f"Lark send status={r.status_code} resp={data}")
+        response_data = r.json()
+        if response_data.get("code", 0) != 0:
+            logging.error(f"Lark API error: {response_data.get('msg')}")
+            return False
             
+        logging.info(f"Message sent successfully to chat {chat_id}")
         return True
+        
     except Exception as e:
         logging.error(f"Failed to send message to chat {chat_id}: {e}")
         return False
@@ -93,6 +105,17 @@ def minutes_until(target: datetime, now: datetime) -> int:
     return max(0, int(delta.total_seconds() // 60))
 
 # ---------- Routes ----------
+@app.route("/", methods=["GET"])
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        "ok": True, 
+        "service": "fikabot", 
+        "status": "running",
+        "lark_configured": bool(APP_ID and APP_SECRET),
+        "timestamp": datetime.now(TZ).isoformat()
+    })
+
 @app.route("/lark", methods=["POST"])
 def lark_events():
     """Handle incoming Lark events"""
@@ -116,18 +139,10 @@ def lark_events():
             msg = event.get("message", {})
             chat_id = msg.get("chat_id")
             content_raw = msg.get("content", "{}")
-            message_type = msg.get("message_type")
 
             try:
                 parsed = json.loads(content_raw)
-                
-                # Extract text based on message type
-                if message_type == "text":
-                    text = (parsed.get("text") or "").lower()
-                else:
-                    # For other message types, try to find text
-                    text = (parsed.get("text") or "").lower()
-                    
+                text = (parsed.get("text") or "").lower()
             except Exception as e:
                 logging.error(f"Error parsing message content: {e}")
                 text = ""
@@ -159,6 +174,7 @@ def lark_events():
         logging.exception(f"Error in /lark: {str(e)}")
         return jsonify({"code": 0, "msg": "handled-error"})
 
+# Add this to ensure proper handling in production
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
