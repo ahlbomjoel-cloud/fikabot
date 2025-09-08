@@ -139,10 +139,10 @@ def lark_events():
                 mins = minutes_until(target_dt, now)
                 
                 if mins == 0:
-                    reply = f"☕️ It's FIKA time right now ({target_label})!"
+                    reply = f"It's FIKA time right now ({target_label})!"
                 else:
                     plural = "s" if mins != 1 else ""
-                    reply = f"☕️ Next fika is at {target_label} (local).\n⏳ {mins} minute{plural} left."
+                    reply = f"Next fika is at {target_label} (local).\n {mins} minute{plural} left."
                 
                 ok = send_text_to_chat(chat_id, reply)
                 logging.info(f"Sent reply ok={ok}")
