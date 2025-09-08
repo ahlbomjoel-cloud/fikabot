@@ -53,7 +53,12 @@ def get_tenant_access_token():
 def send_text_to_chat(chat_id: str, text: str):
     """Send a text message to a Lark chat"""
     try:
+        # Get the access token
         token = get_tenant_access_token()
+        if not token:
+            logging.error("Failed to obtain access token")
+            return False
+            
         url = "https://open.larksuite.com/open-apis/im/v1/messages"
         headers = {
             "Authorization": f"Bearer {token}",
@@ -65,28 +70,42 @@ def send_text_to_chat(chat_id: str, text: str):
             "receive_id_type": "chat_id",
             "receive_id": chat_id,
             "msg_type": "text",
-            "content": {"text": text},  # This is the key fix - no json.dumps() here!
+            "content": {"text": text},
         }
         
         if DEBUG_VERBOSE:
             logging.info(f"POST {url}")
+            logging.info(f"Headers: {headers}")
             logging.info(f"Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
             
         r = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        # Get the response for debugging
+        response_data = r.json()
+        logging.info(f"Response status: {r.status_code}")
+        logging.info(f"Response body: {response_data}")
+        
         r.raise_for_status()
         
-        response_data = r.json()
         if response_data.get("code", 0) != 0:
-            logging.error(f"Lark API error: {response_data.get('msg')}")
+            logging.error(f"Lark API error: Code {response_data.get('code')}, Message: {response_data.get('msg')}")
             return False
             
         logging.info(f"Message sent successfully to chat {chat_id}")
         return True
         
+    except requests.exceptions.HTTPError as e:
+        logging.error(f"HTTP error sending message: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                logging.error(f"Error response: {error_data}")
+            except:
+                logging.error(f"Error response text: {e.response.text}")
+        return False
     except Exception as e:
         logging.error(f"Failed to send message to chat {chat_id}: {e}")
         return False
-
 def next_fika(now: datetime):
     """Calculate the next fika time"""
     today_slots = [datetime.combine(now.date(), t, tzinfo=TZ) for t in FIKA_SLOTS]
