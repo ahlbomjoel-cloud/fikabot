@@ -91,9 +91,9 @@ def lark_events():
             return Response(json.dumps({"challenge": challenge}), status=200, mimetype="application/json")
 
         # 2) Normal events
-        event = data.get("event", {})
-        etype = event.get("type")
-        logging.info(f"Event type={etype}")
+event = data.get("event", {})
+etype = data.get("header", {}).get("event_type")
+logging.info(f"Event type={etype}")
 
         if etype == "message":
             msg = event.get("message", {}) or {}
