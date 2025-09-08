@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify
 import requests
 
@@ -8,13 +10,12 @@ import requests
 APP_ID = "cli_a834297edb38de1a"
 APP_SECRET = "WLzBxwkIcrTiemSVhDb7NhLcmUdrIL4J"
 
+TZ = ZoneInfo("Europe/Stockholm")  # CET/CEST with DST handled
+
 app = Flask(__name__)
 
-# ===== Helpers =====
+# --------- Lark helpers ---------
 def get_tenant_access_token():
-    """
-    Get a tenant access token for this app.
-    """
     url = "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal"
     resp = requests.post(url, json={"app_id": APP_ID, "app_secret": APP_SECRET}, timeout=10)
     resp.raise_for_status()
@@ -24,9 +25,6 @@ def get_tenant_access_token():
     return data["tenant_access_token"]
 
 def send_text_to_chat(chat_id: str, text: str):
-    """
-    Send a plain text message into the chat.
-    """
     token = get_tenant_access_token()
     url = "https://open.larksuite.com/open-apis/im/v1/messages"
     headers = {"Authorization": f"Bearer {token}"}
@@ -40,32 +38,45 @@ def send_text_to_chat(chat_id: str, text: str):
     logging.info(f"Lark send status={r.status_code}, resp={r.text}")
     return True
 
-# ===== Routes =====
+# --------- Fika time logic ---------
+FIKA_SLOTS = (time(10, 0), time(15, 0))  # 10:00, 15:00 local
+
+def next_fika(now: datetime):
+    """Return (next_datetime, label_str) for the next fika slot from now."""
+    today_slots = [datetime.combine(now.date(), t, tzinfo=TZ) for t in FIKA_SLOTS]
+    # pick the first slot still ahead today
+    for dt in today_slots:
+        if dt > now:
+            return dt, dt.strftime("%H:%M")
+    # otherwise, tomorrow at first slot (10:00)
+    tomorrow = now.date() + timedelta(days=1)
+    dt = datetime.combine(tomorrow, FIKA_SLOTS[0], tzinfo=TZ)
+    return dt, dt.strftime("%H:%M")
+
+def minutes_until(target: datetime, now: datetime) -> int:
+    """Whole minutes until target (floor)."""
+    delta = target - now
+    return max(0, int(delta.total_seconds() // 60))
+
+# --------- Routes ---------
 @app.route("/", methods=["GET"])
 def health():
-    """
-    Health check for Render.
-    """
     return jsonify({"ok": True, "service": "fikabot", "status": "running"})
 
 @app.route("/lark", methods=["POST"])
 def lark_events():
-    """
-    Handle Lark events (verification + messages).
-    """
     data = request.get_json(force=True, silent=True) or {}
 
-    # 1) URL verification handshake
+    # URL verification handshake
     if "challenge" in data:
         return jsonify({"challenge": data["challenge"]})
 
-    # 2) Event handling
     event = data.get("event", {})
     if event.get("type") == "message":
         msg = event.get("message", {}) or {}
         chat_id = msg.get("chat_id")
 
-        # Extract text + mentions
+        # Parse content to get text + mentions
         try:
             parsed = json.loads(msg.get("content", "{}"))
             text = (parsed.get("text") or "").lower()
@@ -73,17 +84,28 @@ def lark_events():
         except Exception:
             text, mentions = "", []
 
-        # Check if bot was tagged
-        bot_was_tagged = any(m.get("name") for m in mentions)
+        # Only respond when the bot is @mentioned
+        bot_was_tagged = bool(mentions)
 
-        # Only reply if @mentioned AND "fika" in text
-        if bot_was_tagged and "fika" in text:
-            send_text_to_chat(chat_id, "☕️ FIKA is at 09:59 & 14:59 CET!")
+        if bot_was_tagged:
+            now = datetime.now(TZ)
+            target_dt, target_label = next_fika(now)
+            mins = minutes_until(target_dt, now)
 
-    # Always return quickly so Lark stops retrying
+            if mins == 0:
+                reply = f"☕️ It’s FIKA time right now ({target_label})!"
+            else:
+                reply = (
+                    f"☕️ Next fika is at {target_label} (local).\n"
+                    f"⏳ {mins} minute{'s' if mins != 1 else ''} left."
+                )
+            # Optional: only answer when message includes 'fika' to be extra strict:
+            # if "fika" in text:
+            send_text_to_chat(chat_id, reply)
+
+    # Quick ACK to minimize compute
     return jsonify({"code": 0, "msg": "ok"})
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port)
-
