@@ -93,23 +93,13 @@ def minutes_until(target: datetime, now: datetime) -> int:
     return max(0, int(delta.total_seconds() // 60))
 
 # ---------- Routes ----------
-@app.route("/", methods=["GET"])
-def health():
-    """Health check endpoint"""
-    return jsonify({
-        "ok": True, 
-        "service": "fikabot", 
-        "status": "running",
-        "lark_configured": bool(APP_ID and APP_SECRET)
-    })
-
 @app.route("/lark", methods=["POST"])
 def lark_events():
     """Handle incoming Lark events"""
     try:
         data = request.get_json(force=True, silent=True) or {}
         if DEBUG_VERBOSE:
-            logging.info(f"RAW EVENT: {data}")
+            logging.info(f"RAW EVENT: {json.dumps(data, indent=2)}")
 
         # URL verification handshake
         if "challenge" in data:
@@ -126,26 +116,42 @@ def lark_events():
             msg = event.get("message", {})
             chat_id = msg.get("chat_id")
             content_raw = msg.get("content", "{}")
+            message_type = msg.get("message_type")
 
             try:
                 parsed = json.loads(content_raw)
-                text = (parsed.get("text") or "").lower()
-            except Exception:
+                
+                # Extract text based on message type
+                if message_type == "text":
+                    text = (parsed.get("text") or "").lower()
+                else:
+                    # For other message types, try to find text
+                    text = (parsed.get("text") or "").lower()
+                    
+            except Exception as e:
+                logging.error(f"Error parsing message content: {e}")
                 text = ""
                 
-            if chat_id and "fika" in text:
+            # Log the extracted text for debugging
+            logging.info(f"Extracted text: '{text}' from content: {content_raw}")
+                
+            # Check if message contains "fika" (case insensitive)
+            if chat_id and text and "fika" in text:
                 now = datetime.now(TZ)
                 target_dt, target_label = next_fika(now)
                 mins = minutes_until(target_dt, now)
                 
                 if mins == 0:
-                    reply = f"It's FIKA time right now ({target_label})!"
+                    reply = f"☕️ It's FIKA time right now ({target_label})!"
                 else:
                     plural = "s" if mins != 1 else ""
-                    reply = f"Next fika is at {target_label} (local).\n {mins} minute{plural} left."
+                    reply = f"☕️ Next fika is at {target_label} (local).\n⏳ {mins} minute{plural} left."
                 
+                logging.info(f"Attempting to send reply: {reply}")
                 ok = send_text_to_chat(chat_id, reply)
                 logging.info(f"Sent reply ok={ok}")
+            else:
+                logging.info(f"Message does not contain 'fika' or no chat_id. Text: '{text}', Chat ID: {chat_id}")
 
         return jsonify({"code": 0, "msg": "ok"})
 
